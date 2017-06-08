@@ -1,0 +1,251 @@
+<apex:page showHeader="false" applyHtmlTag="false" docType="html-5.0" controller="DataViewerController">
+
+<!-- GOOD RESOURCE: https://vitalets.github.io/angular-xeditable/-->
+
+	<head>
+		<meta charset="utf-8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1"/>
+		<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.2/css/bootstrap.min.css"/>
+		<script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.6.4/angular.min.js"></script>
+		<apex:stylesheet value="{!URLFOR($Resource.slds231, 'assets/styles/salesforce-lightning-design-system.min.css')}" />
+		<style>
+			.check-element {
+				border: 1px solid black;
+				opacity: 1;
+				padding: 10px;
+			}
+			tr:hover {
+				background: #EEE;
+			}
+		</style>
+		<script>
+			var app = angular.module('myApp', []);
+			app.controller('myctrl',['$scope', function ($scope) {
+				var selectedObj = '';
+				let fieldsForQuery = new Set();
+				$scope.onFieldClick = function(key){
+					var isFieldInQuery = fieldsForQuery.has(key);
+					var fieldRow = document.querySelector("div[id=fieldsContainer] td[id="+ key +"]").parentElement;
+					if(isFieldInQuery){
+						fieldsForQuery.delete(key);
+						fieldRow.style.background = "";
+					} else {
+						fieldsForQuery.add(key);
+						fieldRow.style.background = "#AAA";
+					}
+				};
+				$scope.stepBackClick = function() {
+					console.log($scope.flagOnFieldsTable);
+					console.log($scope.flagOnDataTable);
+					console.log(typeof $scope.flagOnFieldsTable);
+					console.log(typeof $scope.flagOnDataTable);
+					if($scope.flagOnFieldsTable) {
+						$scope.flagOnFieldsTable = String.EMPTY;
+						$scope.flagOnObjTable = String.EMPTY;
+						$scope.columnNames = [];
+						fieldsForQuery.clear();
+					}
+					if ($scope.flagOnDataTable) {
+						$scope.flagOnDataTable = String.EMPTY;
+						$scope.flagOnFieldsTable = 'checked';
+					}
+				};
+				$scope.runQuery = function(){
+					var fieldList = [];
+					fieldsForQuery.forEach(field => fieldList.push(field))
+					DataViewerController.getData(
+						selectedObj,
+						JSON.stringify(fieldList),
+						function(result, event) {
+							var data = JSON.parse(result);
+							$scope.rawData = data;
+							var objtsWithLCKeys = [];
+							for (var obj in data){
+								var newObj = {};
+								for(var key in data[obj]){
+									var keyLowercase = key.toLocaleLowerCase().toString();
+									newObj[keyLowercase] = data[obj][key];
+								}
+								objtsWithLCKeys.push(newObj);
+							}
+							var preparedData = [];
+							var isViewMode = {};
+							for (var obj in objtsWithLCKeys){
+								if (!objtsWithLCKeys[obj].id) continue;
+								var preparedObj = {'id':objtsWithLCKeys[obj].id};
+								isViewMode[objtsWithLCKeys[obj].id] = true;
+								fieldsForQuery.forEach(field => {
+									preparedObj[field] = objtsWithLCKeys[obj][field] ? objtsWithLCKeys[obj][field] : String.EMPTY;
+								})
+								preparedObj['editButton'] = String.EMPTY;
+								preparedData.push(preparedObj);
+							}
+							var columnNames = [];
+							var columnTypes = [];
+							fieldsForQuery.forEach(field => {
+									$scope.fields.forEach(fieldObj => {
+										if (fieldObj.key == field) {
+											columnNames.push(fieldObj.label);
+											columnTypes[field] = fieldObj.type;
+										}
+									})
+								}
+							)
+							$scope.isViewMode = isViewMode;
+							$scope.columnNames = columnNames;
+							$scope.columnTypes = columnTypes;
+							$scope.data = preparedData;
+							$scope.flagOnDataTable = 'checked';
+							$scope.flagOnFieldsTable = String.EMPTY;
+							$scope.$apply();
+						},
+						{escape: false}
+					);;
+				};;
+				$scope.selectFields = function(key){
+					selectedObj = key;
+					DataViewerController.getFields(
+						key,
+						function(result, event) {
+							$scope.flagOnObjTable = 'checked';
+							$scope.flagOnFieldsTable = 'checked';
+							var fieldsData = JSON.parse(result);
+							console.log(result);
+							var fields = [];
+							var fieldOptions = {};
+							for (var apiName in fieldsData){
+								var field = {
+									'key' : apiName,
+									'label' : fieldsData[apiName]['label'],
+									'isEditable' : fieldsData[apiName]['isEditable'],
+									'isCreateable' : fieldsData[apiName]['isCreateable'],
+									'isCustom' : fieldsData[apiName]['isCustom'],
+									'type' : fieldsData[apiName]['type']
+								};
+								fields.push(field);
+								fieldOptions[apiName.toLocaleLowerCase()] = {
+									'isEditable' : (fieldsData[apiName]['isEditable'] == 'true'),
+									'isCreateable' : (fieldsData[apiName]['isCreateable'] == 'true'),
+									'isCustom' : (fieldsData[apiName]['isCustom'] == 'true')
+								}
+							}
+							$scope.fieldOptions = fieldOptions;
+							$scope.fields = fields;
+							$scope.$apply();
+						},
+						{escape: false}
+					);
+				};
+				var remoteGetSObjNames = '{!$RemoteAction.DataViewerController.getSObjectNames}';
+				Visualforce.remoting.Manager.invokeAction(
+					remoteGetSObjNames,
+					function(result, event) {
+						var sObjNames = JSON.parse(result);
+						var objects = [];
+						for (var key in sObjNames){
+							objects.push(
+								{
+									'key' : key,
+									'label' : sObjNames[key]
+								}
+							);
+						}
+						$scope.objects = objects;
+						$scope.$apply();
+					},
+					{escape: false}
+				);
+				$scope.editBtnClick = function(id) {
+					console.log($scope.isViewMode);
+					$scope.isViewMode[id] = false;
+				};
+				$scope.saveBtnClick = function(id) {
+					$scope.isViewMode[id] = true;
+					var objForUpdate = {};
+					$scope.data.forEach( obj => {
+						if(obj.id == id) {
+							for (var key in obj)
+							objForUpdate[key] = obj[key];
+						}
+					});
+					$scope.rawData.forEach( rawObj => {
+						if(rawObj.Id == objForUpdate.id){
+							objForUpdate.attributes = rawObj.attributes;
+						}
+					});
+					delete objForUpdate.$$hashKey;
+
+					DataViewerController.updateRow(
+						JSON.stringify(objForUpdate),
+						function(result, event){
+							console.log(result);
+						},
+						{escape: false}
+					);
+
+				};
+				$scope.cancelBtnClick = function(id) {
+					console.log($scope.idEditMode);
+					$scope.isViewMode[id] = true;
+				}
+			}])
+			.directive("viewEditBtn", function() {
+				return function (scope, element, attrs){
+				}
+			});
+		</script>
+	</head>
+	<body ng-app="myApp" ng-controller="myctrl">
+		<button class="slds-button" type="button" ng-show="flagOnObjTable" ng-click="stepBackClick()">Step back</button>
+		<div class="check-element animate-show-hide" ng-hide="flagOnObjTable">
+			<table class="slds-table slds-table_bordered slds-table_cell-buffer">
+				<tr class="slds-text-title_caps">
+					<th scope="col">Object names</th>
+				</tr>
+				<input type="search" ng-model="q" placeholder="filter objects..." aria-label="filter objects" />
+				<tr class="animate-repeat" ng-click="selectFields(obj['key'])" ng-repeat="obj in objects | filter:q as results">
+					<td id="{{obj['key']}}">{{obj['label']}}</td>
+				</tr>
+				<tr class="animate-repeat" ng-if="results.length === 0">
+					<td>No results found...</td>
+				</tr>
+			</table>
+		</div>
+
+		<div id="fieldsContainer" class="check-element animate-show-hide" ng-show="flagOnFieldsTable">
+			<button class="slds-button" type="button" ng-click="runQuery()">Run Query</button>
+			<table class="slds-table slds-table_bordered slds-table_cell-buffer">
+				<tr class="slds-text-title_caps">
+					<th scope="col">Field Names</th>
+					<th scope="col">Is Editable</th>
+					<th scope="col">Is Createable</th>
+					<th scope="col">Is Custom</th>
+					<th scope="col">Type Of Field</th>
+				</tr>
+				<tr class="animate-repeat" ng-click="onFieldClick(field['key'])" ng-repeat="field in fields">
+					<td id="{{field['key']}}">{{field['label']}}</td>
+					<td style="color: gray;">{{field['isEditable']}}</td>
+					<td style="color: gray;">{{field['isCreateable']}}</td>
+					<td style="color: gray;">{{field['isCustom']}}</td>
+					<td style="color: gray;">{{field['type']}}</td>
+				</tr>
+			</table>
+		</div>
+		<div id="dataContainer" ng-show="flagOnDataTable">
+			<table class="slds-table slds-table_bordered slds-table_cell-buffer">
+				<tr class="slds-text-title_caps">
+					<th scope="col" ng-repeat="name in columnNames">{{name}}</th>
+				</tr>
+				<tr class="animate-repeat" ng-click="" ng-repeat="obj in data">
+					<td view-edit-btn="key" ng-repeat="(key, value) in obj" ng-if="key != 'id'">
+						<span ng-show="isViewMode[obj.id]||!fieldOptions[key]['isEditable']">{{obj[key]}}</span>
+						<input class="slds-input" ng-hide="isViewMode[obj.id]" editable="editable" ng-model="obj[key]" ng-if="(key != 'editButton')&&fieldOptions[key]['isEditable']"/>
+						<button class="slds-button" ng-show="isViewMode[obj.id]" editBtn='editBtn' ng-click="editBtnClick(obj.id)" ng-if="key == 'editButton'">Edit</button>
+						<button class="slds-button" ng-hide="isViewMode[obj.id]" editBtn='saveBtn' ng-click="saveBtnClick(obj.id)" ng-if="key == 'editButton'">Save</button>
+						<button class="slds-button" ng-hide="isViewMode[obj.id]" editBtn='cancelBtn' ng-click="cancelBtnClick(obj.id)" ng-if="key == 'editButton'">Cancel</button>
+					</td>
+				</tr>
+			</table>
+		</div>
+	</body>
+</apex:page>
