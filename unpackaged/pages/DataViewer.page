@@ -136,6 +136,9 @@
 						{escape: false}
 					);
 				};
+				var testFunc = function(){
+					console.log('hello Andry')
+				}
 				var remoteGetSObjNames = '{!$RemoteAction.DataViewerController.getSObjectNames}';
 				Visualforce.remoting.Manager.invokeAction(
 					remoteGetSObjNames,
